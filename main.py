@@ -1,43 +1,53 @@
 import requests
 from bs4 import BeautifulSoup
-from openpyxl import Workbook
+import pandas as pd
+import time
 
-def ScrapeIMDBTop250():
-    try:
-        imdbTop250URL = 'https://www.imdb.com/chart/top/'
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(imdbTop250URL, headers=headers)
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to retrieve page. Status code: {response.status_code}")
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # print(soup.prettify())
-        
-        movie_data_list = []
-        for movieRow in soup.select('tbody.lister-list tr'):
-            movieTitle = movieRow.find('td', class_='titleColumn').find('a').get_text(strip=True)
-            releaseYear = movieRow.find('span', class_='secondaryInfo').get_text(strip=True)
-            imdbRating = movieRow.find('td', class_='ratingColumn imdbRating').find('strong').get_text(strip=True)
-            movie_data_list.append({'Title': movieTitle, 'Year': releaseYear, 'Rating': imdbRating})
+genres = ["action", "drama", "romance", "sci-fi", "comedy", "animation"]
+base_url = "https://www.imdb.com/chart/top/"
+headers = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+}
 
-        WorkbookObject = Workbook()
-        active_sheet = WorkbookObject.active
-        active_sheet.append(['Title', 'Year', 'Rating'])
+def scrape_genre(genre):
+    print(f"Scraping genre: {genre}")
+    response = requests.get(base_url.format(genre), headers=headers)
+    soup = BeautifulSoup(response.content, "html.parser")
+    containers = soup.find_all("div", class_="lister-item mode-advanced")
+    print(f"Found {len(containers)} movie entries for {genre}.")
 
-        for movieData in movie_data_list:
-            active_sheet.append([movieData['Title'], movieData['Year'], movieData['Rating']])
-        
-        WorkbookObject.save('imdb_top_250.xlsx')
-        print("Data successfully written to 'imdb_top_250.xlsx'")
-    
-    except requests.exceptions.RequestException as networkError:
-        print(f"Network error: {networkError}")
-    
-    except Exception as generalError:
-        print(f"An error occurred: {generalError}")
+    rows = []
+    for container in containers:
+        title_tag = container.h3.a
+        rating_tag = container.find("div", class_="ratings-bar")
+        vote_tags = container.find_all("span", attrs={"name": "nv"})
 
-ScrapeIMDBTop250()
+        title = title_tag.text.strip() if title_tag else None
+        rating = container.strong.text.strip() if container.strong else None
+        votes = vote_tags[0]['data-value'] if vote_tags else None
+        gross = vote_tags[1].text if len(vote_tags) > 1 else None
+
+        rows.append({
+            "MovieTitle": title,
+            "Genre": genre.capitalize(),
+            "Rating": rating,
+            "Votercount": votes,
+            "Gross": gross if gross else "N/A"
+        })
+
+    df = pd.DataFrame(rows)
+    print(f"Completed genre: {genre}, rows collected: {len(df)}\n")
+    return df
+
+print("Starting IMDb scraping by genre...")
+all_data = []
+
+for genre in genres:
+    genre_df = scrape_genre(genre)
+    all_data.append(genre_df)
+    time.sleep(1)  
+
+final_df = pd.concat(all_data, ignore_index=True)
+print("Scraping completed. Saving to CSV...")
+final_df.to_csv("IMDb_Genre_Top50.csv", index=False)
+print("Data saved to IMDb_Genre_Top50.csv")
